@@ -31,23 +31,51 @@ export function useBlackHoleSession() {
 
     const ws = new WebSocket(`${BLACK_HOLE_WS_BASE}/ws/${sessionId}`);
     
+    ws.onopen = () => {
+      console.log('🌌 Black hole WebSocket connected, session:', sessionId);
+    };
+    
+    ws.onclose = (event) => {
+      console.log('🌌 Black hole WebSocket closed:', event.code, event.reason);
+    };
+    
+    ws.onerror = (error) => {
+      console.error('🌌 Black hole WebSocket error:', error);
+    };
+    
     ws.onmessage = (event) => {
-      const message: WebSocketMessage = JSON.parse(event.data);
+      console.log('🌌 Black hole WebSocket message received:', event.data);
       
-      if (message.type === 'file_delivery') {
-        const fileDelivery = message as FileDelivery;
-        if (onFileReceived) {
-          onFileReceived(fileDelivery.filename, fileDelivery.file_content);
-        }
+      try {
+        const message: WebSocketMessage = JSON.parse(event.data);
+        console.log('🌌 Parsed message type:', message.type);
         
-        // Send acknowledgment
-        ws.send(JSON.stringify({
-          type: 'file_received_ack',
-          file_id: fileDelivery.file_id
-        }));
-      } else if (message.type === 'heartbeat') {
-        // Respond to heartbeat
-        ws.send(JSON.stringify({ type: 'heartbeat_ack' }));
+        if (message.type === 'file_delivery') {
+          const fileDelivery = message as FileDelivery;
+          console.log('🌌 FILE DELIVERY:', {
+            filename: fileDelivery.filename,
+            file_size: fileDelivery.file_size,
+            content_type: fileDelivery.content_type,
+            file_id: fileDelivery.file_id
+          });
+          
+          if (onFileReceived) {
+            onFileReceived(fileDelivery.filename, fileDelivery.file_content);
+          }
+          
+          // Send acknowledgment
+          ws.send(JSON.stringify({
+            type: 'file_received_ack',
+            file_id: fileDelivery.file_id
+          }));
+        } else if (message.type === 'heartbeat') {
+          // Respond to heartbeat
+          ws.send(JSON.stringify({ type: 'heartbeat_ack' }));
+        } else {
+          console.log('🌌 Unknown message type:', message.type, message);
+        }
+      } catch (error) {
+        console.error('🌌 Failed to parse WebSocket message:', error, event.data);
       }
     };
 

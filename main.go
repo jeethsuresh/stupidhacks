@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"html/template"
@@ -13,6 +14,14 @@ import (
 
 	"github.com/gorilla/websocket"
 )
+
+// Helper function
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
 
 const (
 	trashPath     = "/Users/brark/.Trash" // <- replace
@@ -33,18 +42,45 @@ var (
 )
 
 func main() {
+	fmt.Println("🚀 Starting Cosmic File Portal Go Backend...")
+	fmt.Printf("🚀 Trash path: %s\n", trashPath)
+	fmt.Printf("🚀 Backup folder: %s\n", backupFolder)
+	fmt.Printf("🚀 Server address: %s\n", serverAddress)
+
 	go monitorTrash()
 
+	fmt.Println("🚀 Setting up HTTP routes...")
 	http.HandleFunc("/", listFilesHandler)
 	http.HandleFunc("/api/tree", fileTreeHandler)
+	http.HandleFunc("/api/save-file", saveFileHandler)
+	http.HandleFunc("/api/test", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Println("🧪 Test endpoint called")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Content-Type", "application/json")
+		response := map[string]string{
+			"status":    "ok",
+			"message":   "Go backend is running",
+			"timestamp": time.Now().Format(time.RFC3339),
+		}
+		json.NewEncoder(w).Encode(response)
+	})
 
 	// Add CORS middleware to file server
 	fileServer := http.StripPrefix("/files/", http.FileServer(http.Dir(backupFolder)))
 	http.Handle("/files/", corsMiddleware(fileServer))
 	http.HandleFunc("/ws", wsHandler)
 
-	fmt.Printf("Serving at http://localhost%s\n", serverAddress)
-	http.ListenAndServe(serverAddress, nil)
+	fmt.Printf("🚀 Server starting at http://localhost%s\n", serverAddress)
+	fmt.Println("🚀 Available endpoints:")
+	fmt.Println("   GET  / - File browser")
+	fmt.Println("   GET  /api/tree - File tree API")
+	fmt.Println("   POST /api/save-file - Save file from black hole")
+	fmt.Println("   GET  /files/* - File server")
+	fmt.Println("   WS   /ws - WebSocket for real-time updates")
+
+	if err := http.ListenAndServe(serverAddress, nil); err != nil {
+		fmt.Printf("🚀 Server failed to start: %v\n", err)
+	}
 }
 
 func monitorTrash() {
@@ -319,4 +355,104 @@ func corsMiddleware(next http.Handler) http.Handler {
 
 		next.ServeHTTP(w, r)
 	})
+}
+
+func saveFileHandler(w http.ResponseWriter, r *http.Request) {
+	fmt.Printf("🔥 saveFileHandler called - Method: %s, URL: %s\n", r.Method, r.URL.Path)
+
+	// Add CORS headers
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+	// Handle preflight OPTIONS request
+	if r.Method == "OPTIONS" {
+		fmt.Println("🔥 Handling OPTIONS preflight request")
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	if r.Method != "POST" {
+		fmt.Printf("🔥 Error: Invalid method %s, expected POST\n", r.Method)
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	fmt.Println("🔥 Reading request body...")
+
+	// Parse JSON body
+	var request struct {
+		Filename    string `json:"filename"`
+		FileContent string `json:"fileContent"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		fmt.Printf("🔥 Error parsing JSON: %v\n", err)
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	fmt.Printf("🔥 Parsed request - Filename: %s, Content length: %d\n", request.Filename, len(request.FileContent))
+
+	if request.Filename == "" {
+		fmt.Println("🔥 Error: Empty filename")
+		http.Error(w, "Filename is required", http.StatusBadRequest)
+		return
+	}
+
+	if request.FileContent == "" {
+		fmt.Println("🔥 Error: Empty file content")
+		http.Error(w, "File content is required", http.StatusBadRequest)
+		return
+	}
+
+	// Decode hex string to bytes
+	fmt.Printf("🔥 Decoding hex string (first 20 chars): %s...\n", request.FileContent[:min(20, len(request.FileContent))])
+	bytes, err := hex.DecodeString(request.FileContent)
+	if err != nil {
+		fmt.Printf("🔥 Error decoding hex string: %v\n", err)
+		http.Error(w, "Invalid file content format", http.StatusBadRequest)
+		return
+	}
+
+	fmt.Printf("🔥 Decoded %d bytes from hex string\n", len(bytes))
+
+	// Ensure backup folder exists
+	if err := os.MkdirAll(backupFolder, 0755); err != nil {
+		fmt.Printf("🔥 Error creating backup folder: %v\n", err)
+		http.Error(w, "Failed to create backup folder", http.StatusInternalServerError)
+		return
+	}
+
+	// Save file to backup folder
+	filePath := filepath.Join(backupFolder, request.Filename)
+	fmt.Printf("🔥 Saving file to: %s\n", filePath)
+
+	if err := os.WriteFile(filePath, bytes, 0644); err != nil {
+		fmt.Printf("🔥 Error writing file: %v\n", err)
+		http.Error(w, "Failed to save file", http.StatusInternalServerError)
+		return
+	}
+
+	fmt.Printf("🔥 File saved successfully: %s (%d bytes)\n", filePath, len(bytes))
+
+	// Broadcast new file to WebSocket clients
+	broadcastNewFile(request.Filename)
+	fmt.Printf("🔥 Broadcasted new file notification: %s\n", request.Filename)
+
+	// Respond with success
+	response := map[string]interface{}{
+		"success":  true,
+		"filename": request.Filename,
+		"size":     len(bytes),
+		"path":     filePath,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		fmt.Printf("🔥 Error encoding response: %v\n", err)
+		return
+	}
+
+	fmt.Printf("🔥 Response sent successfully for file: %s\n", request.Filename)
 }

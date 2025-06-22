@@ -117,13 +117,40 @@ export default function Home() {
 
   // Handle files received from black hole
   const handleFileReceived = useCallback((filename: string, fileContent: string) => {
+    console.log('🌌 BLACK HOLE FILE RECEIVED:', filename);
+    console.log('File content length:', fileContent.length);
+    console.log('File content preview:', fileContent.substring(0, 100) + '...');
+    
+    // Show notification immediately
+    addNotification(`🌌 File emerging from black hole: ${filename}`, 'info', 4000);
+    
     const emergingFile: EmergingFile = {
       id: Math.random().toString(36).substr(2, 9),
       filename,
       fileContent,
     };
     setEmergingFiles(prev => [...prev, emergingFile]);
-  }, []);
+  }, [addNotification]);
+
+  // Handle file save success
+  const handleFileSaveSuccess = useCallback((filename: string) => {
+    console.log('💾 File saved successfully to backup:', filename);
+    addNotification(`✅ ${filename} saved to backup folder!`, 'success');
+    
+    // Add file to the list
+    setFiles(prev => {
+      if (!prev.includes(filename)) {
+        return [...prev, filename];
+      }
+      return prev;
+    });
+  }, [addNotification]);
+
+  // Handle file save error
+  const handleFileSaveError = useCallback((filename: string, error: string) => {
+    console.error('💾 File save failed:', filename, error);
+    addNotification(`❌ Failed to save ${filename}: ${error}`, 'error');
+  }, [addNotification]);
 
   useEffect(() => {
     setFileReceivedCallback(handleFileReceived);
@@ -282,7 +309,53 @@ export default function Home() {
           <li className="mb-2">🗑 Trash</li>
           <li className="mb-2">📁 Backup</li>
           <li className="mb-2 mt-6 text-purple-300">🌌 Black Hole Portal</li>
-          <li className="text-sm text-gray-400">Drop files anywhere to upload</li>
+          <li className="text-sm text-gray-400">Drop files to upload</li>
+          <li className="text-sm text-gray-400">Files emerge from cosmic network</li>
+          {process.env.NODE_ENV === 'development' && (
+            <li className="mt-4 space-y-2">
+              <button
+                onClick={async () => {
+                  try {
+                    console.log('🧪 Testing Go backend connection...');
+                    const response = await fetch('http://localhost:8080/api/test');
+                    const result = await response.json();
+                    console.log('🧪 Go backend test result:', result);
+                    addNotification(`✅ Go backend: ${result.message}`, 'success');
+                  } catch (error) {
+                    console.error('🧪 Go backend test failed:', error);
+                    addNotification(`❌ Go backend test failed: ${error}`, 'error');
+                  }
+                }}
+                className="text-xs bg-blue-600 hover:bg-blue-700 text-white px-2 py-1 rounded block w-full mb-1"
+              >
+                🧪 Test Go Backend
+              </button>
+              <button
+                onClick={() => {
+                  // Test file emergence with proper hex content
+                  console.log('🧪 Generating test file...');
+                  
+                  // Create some test content (simple text "Hello from black hole!")
+                  const testText = 'Hello from black hole! This is a test file.';
+                  const testContent = Array.from(testText)
+                    .map(char => char.charCodeAt(0).toString(16).padStart(2, '0'))
+                    .join('');
+                  
+                  console.log('🧪 Test text:', testText);
+                  console.log('🧪 Test hex content:', testContent);
+                  console.log('🧪 Hex content length:', testContent.length);
+                  
+                  const filename = `test-file-${Date.now()}.txt`;
+                  console.log('🧪 Test filename:', filename);
+                  
+                  handleFileReceived(filename, testContent);
+                }}
+                className="text-xs bg-purple-600 hover:bg-purple-700 text-white px-2 py-1 rounded block w-full"
+              >
+                🧪 Test File Emerge
+              </button>
+            </li>
+          )}
         </ul>
       </div>
 
@@ -325,6 +398,8 @@ export default function Home() {
           filename={file.filename}
           fileContent={file.fileContent}
           onComplete={() => handleEmergingFileComplete(file.id)}
+          onSaveSuccess={handleFileSaveSuccess}
+          onSaveError={handleFileSaveError}
         />
       ))}
 
