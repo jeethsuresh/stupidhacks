@@ -39,6 +39,8 @@ export interface FallingFile {
   id: string;
   filename: string;
   startTime: number;
+  startX?: number;
+  startY?: number;
 }
 
 export interface EmergingFile {

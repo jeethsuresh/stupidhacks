@@ -10,7 +10,8 @@ interface FileFallingProps {
 }
 
 interface AnimatedFile extends FallingFile {
-  x: number;
+  startX: number;
+  startY: number;
   targetX: number;
   targetY: number;
 }
@@ -23,14 +24,16 @@ export default function FileFalling({ files, onFileComplete }: FileFallingProps)
       const existing = animatedFiles.find(af => af.id === file.id);
       if (existing) return existing;
 
-      // Random starting position at top of screen
-      const x = Math.random() * (window.innerWidth - 100);
+      // Use provided start position, or default to random position at top
+      const startX = file.startX ?? Math.random() * (window.innerWidth - 100);
+      const startY = file.startY ?? -50;
       const targetX = window.innerWidth / 2; // Center of black hole
       const targetY = window.innerHeight * 0.85; // Black hole position
 
       return {
         ...file,
-        x,
+        startX,
+        startY,
         targetX,
         targetY,
       };
@@ -46,20 +49,35 @@ export default function FileFalling({ files, onFileComplete }: FileFallingProps)
           key={file.id}
           className="fixed z-20 pointer-events-none"
           initial={{
-            x: file.x,
-            y: -50,
+            x: file.startX,
+            y: file.startY,
             scale: 1,
             opacity: 1,
+            rotate: 0,
           }}
           animate={{
-            x: file.targetX,
-            y: file.targetY,
-            scale: 0,
-            opacity: 0,
+            x: [
+              file.startX,
+              file.startX + (file.targetX - file.startX) * 0.3 + 50 * Math.sin(0),
+              file.startX + (file.targetX - file.startX) * 0.6 + 30 * Math.sin(Math.PI),
+              file.targetX + 15 * Math.sin(2 * Math.PI),
+              file.targetX,
+            ],
+            y: [
+              file.startY,
+              file.startY + (file.targetY - file.startY) * 0.3,
+              file.startY + (file.targetY - file.startY) * 0.6,
+              file.startY + (file.targetY - file.startY) * 0.9,
+              file.targetY,
+            ],
+            scale: [1, 0.8, 0.6, 0.3, 0],
+            opacity: [1, 0.9, 0.7, 0.4, 0],
+            rotate: [0, 90, 180, 270, 360],
           }}
           transition={{
             duration: 3,
             ease: "easeIn",
+            times: [0, 0.3, 0.6, 0.9, 1],
           }}
           onAnimationComplete={() => onFileComplete(file.id)}
         >

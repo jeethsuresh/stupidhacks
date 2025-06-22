@@ -5,16 +5,36 @@ import Stars from '../components/Stars';
 import BlackHole from '../components/BlackHole';
 import FileFalling from '../components/FileFalling';
 import FileEmerging from '../components/FileEmerging';
+import NotificationPopup, { Notification } from '../components/NotificationPopup';
 import { useBlackHoleSession } from '../hooks/useBlackHoleSession';
 import { FallingFile, EmergingFile } from '../types';
 
 export default function Home() {
   const [files, setFiles] = useState<string[]>([]);
   const [newFiles, setNewFiles] = useState<string[]>([]);
+  const [isDraggingFile, setIsDraggingFile] = useState(false);
+  const [draggedFileName, setDraggedFileName] = useState<string | null>(null);
+  const [isOverBlackHole, setIsOverBlackHole] = useState(false);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
   
   const { uploadFile, setFileReceivedCallback } = useBlackHoleSession();
   const [fallingFiles, setFallingFiles] = useState<FallingFile[]>([]);
   const [emergingFiles, setEmergingFiles] = useState<EmergingFile[]>([]);
+
+  // Notification helpers
+  const addNotification = useCallback((message: string, type: 'success' | 'error' | 'info' = 'info', duration?: number) => {
+    const notification: Notification = {
+      id: Math.random().toString(36).substr(2, 9),
+      message,
+      type,
+      duration,
+    };
+    setNotifications(prev => [...prev, notification]);
+  }, []);
+
+  const dismissNotification = useCallback((id: string) => {
+    setNotifications(prev => prev.filter(n => n.id !== id));
+  }, []);
 
   // Fetch files from Go backend
   useEffect(() => {
@@ -109,34 +129,127 @@ export default function Home() {
     setFileReceivedCallback(handleFileReceived);
   }, [setFileReceivedCallback, handleFileReceived]);
 
-  // Handle drag and drop for black hole upload
+  // Handle file drag start
+  const handleFileDragStart = useCallback((e: React.DragEvent, fileName: string) => {
+    console.log('Starting drag for file:', fileName);
+    setIsDraggingFile(true);
+    setDraggedFileName(fileName);
+    e.dataTransfer.setData('text/plain', fileName);
+    e.dataTransfer.effectAllowed = 'move';
+    
+    // Add some visual feedback
+    const target = e.currentTarget as HTMLElement;
+    target.style.opacity = '0.7';
+  }, []);
+
+  // Handle file drag end
+  const handleFileDragEnd = useCallback((e: React.DragEvent) => {
+    console.log('Ending drag');
+    setIsDraggingFile(false);
+    setDraggedFileName(null);
+    setIsOverBlackHole(false);
+    
+    // Reset visual feedback
+    const target = e.currentTarget as HTMLElement;
+    target.style.opacity = '1';
+  }, []);
+
+  // Enhanced drag and drop for black hole upload
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
-  }, []);
+    e.dataTransfer.dropEffect = isDraggingFile ? 'move' : 'copy';
+    
+    // Check if we're over the black hole area (bottom half of screen)
+    const isInBlackHoleArea = e.clientY > window.innerHeight * 0.6;
+    setIsOverBlackHole(isInBlackHoleArea && (isDraggingFile || e.dataTransfer.types.includes('Files')));
+  }, [isDraggingFile]);
 
   const handleDrop = useCallback(async (e: React.DragEvent) => {
     e.preventDefault();
-    const droppedFiles = Array.from(e.dataTransfer.files);
     
-    if (droppedFiles.length > 0) {
-      const file = droppedFiles[0];
+    // Check if it's a file from our file browser
+    const fileName = e.dataTransfer.getData('text/plain');
+    if (fileName && isDraggingFile) {
+      console.log('Dropping file from browser:', fileName);
       
-      // Add falling animation
-      const fallingFile: FallingFile = {
-        id: Math.random().toString(36).substr(2, 9),
-        filename: file.name,
-        startTime: Date.now(),
-      };
-      setFallingFiles(prev => [...prev, fallingFile]);
+      // Get drop position for animation
+      const dropX = e.clientX;
+      const dropY = e.clientY;
       
-      // Upload to black hole
       try {
+        // Fetch file from Go backend
+        console.log('Fetching file content from Go backend:', fileName);
+        const response = await fetch(`http://localhost:8080/files/${fileName}`);
+        if (!response.ok) {
+          throw new Error(`Failed to fetch file: ${response.statusText}`);
+        }
+        
+        const blob = await response.blob();
+        const file = new File([blob], fileName, { type: blob.type });
+        
+        // Check file size (100MB limit)
+        if (file.size > 100 * 1024 * 1024) {
+          throw new Error('File size exceeds 100MB limit');
+        }
+        
+        // Add falling animation from drop position
+        const fallingFile: FallingFile = {
+          id: Math.random().toString(36).substr(2, 9),
+          filename: fileName,
+          startTime: Date.now(),
+          startX: dropX,
+          startY: dropY,
+        };
+        setFallingFiles(prev => [...prev, fallingFile]);
+        
+        // Upload to black hole
         await uploadFile(file);
+        
+        // Remove file from list after successful upload
+        setFiles(prev => prev.filter(f => f !== fileName));
+        
+        // Show success notification
+        addNotification(`${fileName} uploaded to black hole successfully!`, 'success');
+        
+        console.log('File successfully uploaded and removed from list');
       } catch (error) {
-        console.error('Upload failed:', error);
+        console.error('File upload failed:', error);
+        const errorMessage = error instanceof Error ? error.message : 'Upload failed';
+        addNotification(`Failed to upload ${fileName}: ${errorMessage}`, 'error');
+      }
+    } else {
+      // Handle regular file drop (from file system)
+      const droppedFiles = Array.from(e.dataTransfer.files);
+      
+      if (droppedFiles.length > 0) {
+        const file = droppedFiles[0];
+        
+        // Add falling animation
+        const fallingFile: FallingFile = {
+          id: Math.random().toString(36).substr(2, 9),
+          filename: file.name,
+          startTime: Date.now(),
+          startX: e.clientX,
+          startY: e.clientY,
+        };
+        setFallingFiles(prev => [...prev, fallingFile]);
+        
+        // Upload to black hole
+        try {
+          await uploadFile(file);
+          addNotification(`${file.name} uploaded to black hole successfully!`, 'success');
+        } catch (error) {
+          console.error('Upload failed:', error);
+          const errorMessage = error instanceof Error ? error.message : 'Upload failed';
+          addNotification(`Failed to upload ${file.name}: ${errorMessage}`, 'error');
+        }
       }
     }
-  }, [uploadFile]);
+    
+    setIsDraggingFile(false);
+    setDraggedFileName(null);
+    setIsOverBlackHole(false);
+  }, [uploadFile, isDraggingFile]);
 
   const handleFileComplete = useCallback((id: string) => {
     setFallingFiles(prev => prev.filter(f => f.id !== id));
@@ -151,10 +264,16 @@ export default function Home() {
       className="flex h-screen relative"
       onDragOver={handleDragOver}
       onDrop={handleDrop}
+      onDragLeave={(e) => {
+        // Only reset if we're leaving the main container
+        if (e.currentTarget === e.target) {
+          setIsOverBlackHole(false);
+        }
+      }}
     >
       {/* Background Effects */}
       <Stars />
-      <BlackHole />
+      <BlackHole isHighlighted={isOverBlackHole} />
       
       {/* Sidebar - exactly like Go template */}
       <div className="w-[220px] bg-[#222] text-white p-5 relative z-20">
@@ -175,13 +294,19 @@ export default function Home() {
           {(() => {
             console.log('Rendering files:', files.length, files);
             return files.map((fileName, index) => (
-              <div key={index} className="bg-[#f9f9f9] border border-[#ddd] rounded-lg p-2.5 text-center shadow-sm">
+              <div 
+                key={index} 
+                className="bg-[#f9f9f9] border border-[#ddd] rounded-lg p-2.5 text-center shadow-sm cursor-grab active:cursor-grabbing hover:shadow-md transition-shadow duration-200"
+                draggable={true}
+                onDragStart={(e) => handleFileDragStart(e, fileName)}
+                onDragEnd={handleFileDragEnd}
+              >
                 <div className="text-[32px] mb-2">📄</div>
                 <a 
                   href={`http://localhost:8080/files/${fileName}`} 
                   target="_blank" 
                   rel="noopener noreferrer"
-                  className="no-underline text-[#333] text-sm break-all hover:text-blue-600"
+                  className="no-underline text-[#333] text-sm break-all hover:text-blue-600 pointer-events-none"
                 >
                   {fileName}
                 </a>
@@ -202,6 +327,12 @@ export default function Home() {
           onComplete={() => handleEmergingFileComplete(file.id)}
         />
       ))}
+
+      {/* Notifications */}
+      <NotificationPopup 
+        notifications={notifications} 
+        onDismiss={dismissNotification} 
+      />
     </div>
   );
 }

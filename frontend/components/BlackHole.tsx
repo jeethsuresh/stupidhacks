@@ -3,7 +3,11 @@
 import { useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 
-export default function BlackHole() {
+interface BlackHoleProps {
+  isHighlighted?: boolean;
+}
+
+export default function BlackHole({ isHighlighted = false }: BlackHoleProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
@@ -68,9 +72,17 @@ export default function BlackHole() {
         centerX, centerY, eventHorizonRadius,
         centerX, centerY, maxRadius
       );
-      gradient.addColorStop(0, 'rgba(138, 43, 226, 0.3)'); // Purple
-      gradient.addColorStop(0.5, 'rgba(75, 0, 130, 0.2)'); // Indigo
-      gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      
+      if (isHighlighted) {
+        gradient.addColorStop(0, 'rgba(255, 215, 0, 0.5)'); // Golden highlight
+        gradient.addColorStop(0.3, 'rgba(138, 43, 226, 0.4)'); // Purple
+        gradient.addColorStop(0.7, 'rgba(75, 0, 130, 0.3)'); // Indigo
+        gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      } else {
+        gradient.addColorStop(0, 'rgba(138, 43, 226, 0.3)'); // Purple
+        gradient.addColorStop(0.5, 'rgba(75, 0, 130, 0.2)'); // Indigo
+        gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      }
 
       ctx.save();
       ctx.fillStyle = gradient;
@@ -90,7 +102,7 @@ export default function BlackHole() {
       window.removeEventListener('resize', resizeCanvas);
       cancelAnimationFrame(animationId);
     };
-  }, []);
+  }, [isHighlighted]);
 
   return (
     <motion.canvas
