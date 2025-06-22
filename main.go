@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"html/template"
 	"io"
@@ -31,6 +32,8 @@ func main() {
 	go monitorTrash()
 
 	http.HandleFunc("/", listFilesHandler)
+	http.HandleFunc("/api/tree", fileTreeHandler)
+
 	http.Handle("/files/", http.StripPrefix("/files/", http.FileServer(http.Dir(backupFolder))))
 	http.HandleFunc("/ws", wsHandler)
 
@@ -237,4 +240,51 @@ func copyDir(src, dst string) error {
 		}
 	}
 	return nil
+}
+
+type FileNode struct {
+	Name     string     `json:"name"`
+	IsDir    bool       `json:"isDir"`
+	Children []FileNode `json:"children,omitempty"`
+}
+
+func buildFileTree(rootPath string) (FileNode, error) {
+	info, err := os.Stat(rootPath)
+	if err != nil {
+		return FileNode{}, err
+	}
+
+	node := FileNode{
+		Name:  info.Name(),
+		IsDir: info.IsDir(),
+	}
+
+	if info.IsDir() {
+		entries, err := os.ReadDir(rootPath)
+		if err != nil {
+			return node, err
+		}
+
+		for _, entry := range entries {
+			childPath := filepath.Join(rootPath, entry.Name())
+			childNode, err := buildFileTree(childPath)
+			if err != nil {
+				continue // skip unreadable children
+			}
+			node.Children = append(node.Children, childNode)
+		}
+	}
+
+	return node, nil
+}
+
+func fileTreeHandler(w http.ResponseWriter, r *http.Request) {
+	tree, err := buildFileTree(backupFolder)
+	if err != nil {
+		http.Error(w, "Failed to build file tree", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(tree)
 }
