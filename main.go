@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	trashPath     = "/Users/jeeth/.Trash" // <- replace
+	trashPath     = "/Users/brark/.Trash" // <- replace
 	backupFolder  = "./TrashBackup"
 	pollInterval  = 1 * time.Second
 	serverAddress = ":8080"
@@ -23,9 +23,13 @@ const (
 
 var (
 	seen     = make(map[string]struct{})
-	upgrader = websocket.Upgrader{}
-	clients  = make(map[*websocket.Conn]bool)
-	mu       sync.Mutex
+	upgrader = websocket.Upgrader{
+		CheckOrigin: func(r *http.Request) bool {
+			return true // Allow connections from any origin
+		},
+	}
+	clients = make(map[*websocket.Conn]bool)
+	mu      sync.Mutex
 )
 
 func main() {
@@ -34,7 +38,9 @@ func main() {
 	http.HandleFunc("/", listFilesHandler)
 	http.HandleFunc("/api/tree", fileTreeHandler)
 
-	http.Handle("/files/", http.StripPrefix("/files/", http.FileServer(http.Dir(backupFolder))))
+	// Add CORS middleware to file server
+	fileServer := http.StripPrefix("/files/", http.FileServer(http.Dir(backupFolder)))
+	http.Handle("/files/", corsMiddleware(fileServer))
 	http.HandleFunc("/ws", wsHandler)
 
 	fmt.Printf("Serving at http://localhost%s\n", serverAddress)
@@ -279,6 +285,17 @@ func buildFileTree(rootPath string) (FileNode, error) {
 }
 
 func fileTreeHandler(w http.ResponseWriter, r *http.Request) {
+	// Add CORS headers
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+	// Handle preflight OPTIONS request
+	if r.Method == "OPTIONS" {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
 	tree, err := buildFileTree(backupFolder)
 	if err != nil {
 		http.Error(w, "Failed to build file tree", http.StatusInternalServerError)
@@ -287,4 +304,19 @@ func fileTreeHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(tree)
+}
+
+func corsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
 }
